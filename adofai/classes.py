@@ -1,19 +1,15 @@
-# (c) Witheria 2024
-import json
-import os
-from typing import Any
+# This file defines helper functions and important structural classes
 
-from .Actions import Saveable
-from .MapModule import MapModule
-from .TileData import TileData
-from .Enums import TileAngle
+import json
+import math
 
 import inspect
+from collections import UserDict
 
 
 def with_kwargs(func):
     """Decorate a function with its own keyword arguments.
-    
+
     Keyword arguments are given with a separate _kwargs parameter.
 
     :param func: The function to be decorated.
@@ -49,9 +45,9 @@ def exclude_key_from_dict(_input: dict, key: object) -> dict:
     return {k: value for k, value in _input.items() if k != key}
 
 
-def group_dicts_by_key(_dict: list[dict], key: str | int | object) -> dict[str | int | object, list[Any]]:
+def group_dicts_by_key(_dict: list[dict], key: str | int) -> dict:
     """Helper function for grouping dictionaries by key.
-    
+
     If a dictionary does not have the key specified, it will not be returned.
 
     :param _dict: list[dict]: list of dictionaries to group
@@ -63,23 +59,160 @@ def group_dicts_by_key(_dict: list[dict], key: str | int | object) -> dict[str |
     for dictionary in _dict:
         if not isinstance(dictionary, dict):
             continue
-        _key = dictionary.get(key, None)
+        _key = dictionary.pop(key, None)
         if not _key:
             continue
         if not result.get(_key, None):
             result[_key] = []
-        result[_key].append(exclude_key_from_dict(dictionary, key))
+        result[_key].append(dictionary)
     return result
 
 
-class MapSetting(Saveable):
+class Savable:
+    """
+    Baseclass which implements save and load methods for classes based on class fields.
+    Serves as a parent class for all Action classes, the MapSetting, Map, and MapData
 
-    """This class interfaces the adofai map settings.
+    functions:
+        load
+        save
+    """
+
+    def load(self, load_obj: str | dict):
+        """
+        Loads all arguments from a dictionary or json object.
+        All keys that are available in the object and exist as attributes in the class
+        get set to the corresponding value.
+
+        :param load_obj: str or dict
+        """
+        if isinstance(load_obj, dict):
+            obj = load_obj
+        else:
+            obj = json.loads(load_obj)
+
+        for key, value in obj.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
+    def save(self, dict_only: bool = False):
+        """
+        Saves all attributes and their values from the class this method
+        gets called from as a dictionary or json object.
+
+        :param dict_only: bool: Returns a dictionary if true (Default value = False)
+        """
+        class_fields = {attr: getattr(self, attr) for attr in dir(self)
+                        if not callable(getattr(self, attr)) and not attr.startswith("__") and not attr == "event_type"}
+        if dict_only:
+            return class_fields
+
+        return json.dumps(class_fields, ensure_ascii=False, indent=4)
+
+
+class Angle:
+    dynamic: bool
+    angle: float
+    letter: str
+
+    relative_angle: float
+    radians: float
+
+    angle_dict: dict = {'R': 0,
+                        'p': 15,
+                        'J': 30,
+                        'E': 45,
+                        'T': 60,
+                        'o': 75,
+                        'U': 90,
+                        'q': 105,
+                        'G': 120,
+                        'Q': 135,
+                        'H': 150,
+                        'W': 165,
+                        'L': 180,
+                        'x': 195,
+                        'N': 210,
+                        'Z': 225,
+                        'F': 240,
+                        'V': 255,
+                        'D': 270,
+                        'Y': 285,
+                        'B': 300,
+                        'C': 315,
+                        'M': 330,
+                        'A': 345,
+                        '5': 108,
+                        '6': 252,
+                        '7': 900,
+                        '8': 360,
+                        "!": 999
+                        }
+
+    def __init__(self, descriptor: str | float, dynamic: bool = False):
+        if isinstance(descriptor, float):
+            self.angle = descriptor
+            self.letter = self.convert_angle_to_letter(descriptor)
+        else:
+            self.letter = descriptor
+            self.angle = self.convert_letter_to_angle(descriptor)
+
+        self.dynamic = dynamic
+        self.radians = math.radians(self.angle)
+
+    def __repr__(self):
+        return str(self.angle)
+
+    def __str__(self):
+        return str(self.angle)
+
+    def __sub__(self, other):
+        return self.angle - other.angle
+
+    def __add__(self, other):
+        return self.angle + other.angle
+
+    def __mul__(self, other):
+        return self.angle * other.angle
+
+    def __truediv__(self, other):
+        return self.angle / other.angle
+
+    def __eq__(self, other):
+        if isinstance(other, Angle):
+            return self.angle == other.angle
+        return self.angle == other
+
+    @property
+    def opposite(self) -> 'Angle':
+        return Angle((abs(self.angle) + 180) % 360)
+
+    @staticmethod
+    def convert_letter_to_angle(letter: str) -> float:
+        return float(Angle.angle_dict[letter])
+
+    @staticmethod
+    def convert_angle_to_letter(angle: float) -> str:
+        return {value: key for key, value in Angle.angle_dict.items()}.get(angle, str(angle))
+
+
+class Decoration(UserDict):
+    """
+        Contains information about decoration objects
+    """
+
+    def __init__(self, *arg, **kw):
+        super(Decoration, self).__init__(*arg, **kw)
+
+
+class MapSetting(Savable):
+    """
+    This class interfaces the adofai map settings.
     Internally, this class has a dictionary of default parameters, and any keyword parameters that don't get set by the
     user are filled up with the default values.
-    
+
     The keyword parameter _kwargs is not to be used when creating this class.
-    
+
     This class inherits from Saveable.
 
     :param version: int
@@ -343,91 +476,3 @@ class MapSetting(Saveable):
             if not _kwargs[key]:
                 self._defaults_dict[key] = _kwargs[key]
             setattr(self, key, _kwargs[key])
-
-
-class MapData(Saveable):
-    """MapData serves as a baseclass for the adofai map contents. It contains map settings and a tile list.
-    
-    This class inherits from Saveable and is used as parent for the main Map class.
-
-    :param map_setting: MapSetting
-    :param tile_data_list: list[TileData]
-
-    """
-
-    MapSetting: MapSetting
-    tile_data_list: list[TileData]
-
-    path: str
-
-    def __init__(self, map_setting: MapSetting = None, tile_data_list: list = None):
-        # Sanitizing args
-        if not tile_data_list:
-            tile_data_list = []
-
-        if not map_setting:
-            map_setting = MapSetting()
-        self.MapSetting = map_setting
-        self.tile_data_list = tile_data_list
-
-    def load(self, path: str = None) -> None:
-        """
-
-        :param path: str:  (Default value = None)
-
-        """
-        if path is None:
-            path = self.path
-
-        if not os.path.exists(path):
-            raise FileNotFoundError
-
-        with open(path, 'r', encoding="utf-8-sig") as f:
-            _map = json.load(f)
-
-        path_data: str = _map.get('pathData')
-
-        settings: dict = _map.get('settings')
-        self.MapSetting.load(settings)
-
-        floor_actions = _map.get('actions')
-
-        if path_data:
-            # If the map contains Letters instead of angles, we go down this road
-            # @TODO Write angle data initialization
-            chars = [char for char in path_data]
-            tile_data = TileData(0, TileAngle.NONE)
-
-            actions_by_floor = group_dicts_by_key(floor_actions, "floor")
-            # print(actions_by_floor)
-            for action in actions_by_floor.get(0, list()):
-                tile_data.add_action(action)
-            self.tile_data_list.append(tile_data)
-
-            for idx, c in enumerate(chars[2:]):
-                _c = chars[idx - 1]
-                tile_angle = MapModule.get_char_tile_angle_map().get(_c)
-                t_data = TileData(idx, tile_angle)
-                for action in actions_by_floor.get(idx, []):
-                    t_data.add_action(action)
-                self.tile_data_list.append(t_data)
-
-    def save(self, path: str = None, return_as_str: bool = False) -> None | str:
-        """
-        For extended documentation read the original documentation for this method.
-
-        Saves all fields of this class to a json file (overwrites the old file if path is not given).
-        The path must be valid, otherwise this method will raise a FileNotFoundError.
-
-        :param path: str:  (Default value = None)
-        :param return_as_str: bool:  (Default value = False)
-
-        """
-        if return_as_str:
-            return json.dumps(self.tile_data_list, ensure_ascii=False, indent=4)
-
-        if path is None:
-            path = self.path
-
-        with open(path, 'w+', encoding="utf-8-sig") as f:
-            json.dump(self.tile_data_list, f, ensure_ascii=False, indent=4)
